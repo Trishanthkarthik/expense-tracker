@@ -1,164 +1,340 @@
 // ============================================================
-// script.js — Expense Tracker Application Logic
+// script.js — Expense Tracker (Upgraded Auth Edition)
 // ============================================================
-// Handles: Authentication (sign-up / login / logout),
-//          Adding expenses, loading expenses, deleting expenses,
-//          Filtering by category, and live total calculation.
+// NEW in this version:
+//   • Google OAuth login
+//   • GitHub OAuth login
+//   • Forgot Password (password reset email)
+//   • Detailed error messages (duplicate email, weak password…)
+//   • Loading spinners on every async button
+//   • Session persisted across page refreshes by Supabase
+//   • Auto-redirect: logged-in users skip straight to dashboard
 // ============================================================
 
 import { supabase } from "./supabase.js";
 
-// ── DOM References ───────────────────────────────────────────
-// Auth section
-const authSection     = document.getElementById("auth-section");
-const appSection      = document.getElementById("app-section");
-const authTitle       = document.getElementById("auth-title");
-const emailInput      = document.getElementById("email");
-const passwordInput   = document.getElementById("password");
-const authBtn         = document.getElementById("auth-btn");
-const authToggleLink  = document.getElementById("auth-toggle-link");
-const authToggleText  = document.getElementById("auth-toggle-text");
-const authError       = document.getElementById("auth-error");
-const logoutBtn       = document.getElementById("logout-btn");
-const userEmailSpan   = document.getElementById("user-email");
+// ── DOM: Auth panels ─────────────────────────────────────────
+const authSection   = document.getElementById("auth-section");
+const loginPanel    = document.getElementById("login-panel");
+const signupPanel   = document.getElementById("signup-panel");
+const forgotPanel   = document.getElementById("forgot-panel");
+
+// Login panel elements
+const loginEmailEl  = document.getElementById("login-email");
+const loginPassEl   = document.getElementById("login-password");
+const loginBtn      = document.getElementById("login-btn");
+const loginError    = document.getElementById("login-error");
+
+// Sign-up panel elements
+const signupEmailEl = document.getElementById("signup-email");
+const signupPassEl  = document.getElementById("signup-password");
+const signupBtn     = document.getElementById("signup-btn");
+const signupError   = document.getElementById("signup-error");
+
+// Forgot-password panel elements
+const forgotEmailEl = document.getElementById("forgot-email");
+const forgotBtn     = document.getElementById("forgot-btn");
+const forgotError   = document.getElementById("forgot-error");
+
+// Panel navigation links
+const goSignup      = document.getElementById("go-signup");
+const goLogin       = document.getElementById("go-login");
+const forgotLink    = document.getElementById("forgot-link");
+const goLoginForgot = document.getElementById("go-login-from-forgot");
+
+// OAuth buttons (one per panel)
+const googleBtns = [document.getElementById("google-btn"), document.getElementById("google-btn-signup")];
+const githubBtns = [document.getElementById("github-btn"), document.getElementById("github-btn-signup")];
+
+// ── DOM: App (dashboard) ─────────────────────────────────────
+const appSection    = document.getElementById("app-section");
+const userEmailSpan = document.getElementById("user-email");
+const logoutBtn     = document.getElementById("logout-btn");
 
 // Expense form
-const expenseForm     = document.getElementById("expense-form");
-const amountInput     = document.getElementById("amount");
-const categoryInput   = document.getElementById("category");
-const noteInput       = document.getElementById("note");
-const dateInput       = document.getElementById("date");
-const formError       = document.getElementById("form-error");
+const expenseForm   = document.getElementById("expense-form");
+const amountInput   = document.getElementById("amount");
+const categoryInput = document.getElementById("category");
+const noteInput     = document.getElementById("note");
+const dateInput     = document.getElementById("date");
+const formError     = document.getElementById("form-error");
 
 // Expense list & summary
-const expenseList     = document.getElementById("expense-list");
-const totalDisplay    = document.getElementById("total-display");
-const filterSelect    = document.getElementById("filter-category");
-const emptyState      = document.getElementById("empty-state");
+const expenseList   = document.getElementById("expense-list");
+const totalDisplay  = document.getElementById("total-display");
+const filterSelect  = document.getElementById("filter-category");
+const emptyState    = document.getElementById("empty-state");
 
 // ── State ────────────────────────────────────────────────────
-let isLoginMode   = true;   // toggles between Login and Sign Up
-let currentUser   = null;   // holds the logged-in user object
-let allExpenses   = [];     // cache of fetched expenses
+let currentUser = null;
+let allExpenses = [];
 
-// ── Initialisation ───────────────────────────────────────────
-// Run when the page first loads
+// ── Supabase redirect URL ────────────────────────────────────
+// auto-detects the current domain (works on localhost AND Vercel)
+const REDIRECT_URL = window.location.origin;
+
+
+// ════════════════════════════════════════════════════════════
+// INITIALISATION — runs on every page load
+// ════════════════════════════════════════════════════════════
 window.addEventListener("DOMContentLoaded", async () => {
-  // Set today's date as default in the date field
   dateInput.value = new Date().toISOString().split("T")[0];
 
-  // Check if a user is already logged in (session persisted by Supabase)
+  // Check for an existing session (persisted in localStorage by Supabase)
   const { data: { session } } = await supabase.auth.getSession();
   if (session?.user) {
-    handleLoginSuccess(session.user);
+    showDashboard(session.user);
   }
 
-  // Listen for auth state changes (login, logout, token refresh)
+  // Single listener for all auth events: login, logout, token refresh, OAuth callback
   supabase.auth.onAuthStateChange((_event, session) => {
     if (session?.user) {
-      handleLoginSuccess(session.user);
+      showDashboard(session.user);
     } else {
-      handleLogout();
+      showAuthScreen();
     }
   });
 });
 
-// ── Auth: Toggle between Login and Sign Up ───────────────────
-authToggleLink.addEventListener("click", (e) => {
-  e.preventDefault();
-  isLoginMode = !isLoginMode;
-  authError.textContent = "";
 
-  if (isLoginMode) {
-    authTitle.textContent        = "Welcome Back";
-    authBtn.textContent          = "Log In";
-    authToggleText.innerHTML     = `Don't have an account? <a href="#" id="auth-toggle-link">Sign Up</a>`;
-  } else {
-    authTitle.textContent        = "Create Account";
-    authBtn.textContent          = "Sign Up";
-    authToggleText.innerHTML     = `Already have an account? <a href="#" id="auth-toggle-link">Log In</a>`;
-  }
+// ════════════════════════════════════════════════════════════
+// PANEL NAVIGATION
+// ════════════════════════════════════════════════════════════
+function showPanel(panelName) {
+  loginPanel.classList.add("hidden");
+  signupPanel.classList.add("hidden");
+  forgotPanel.classList.add("hidden");
 
-  // Re-attach click listener because we replaced the element's HTML
-  document.getElementById("auth-toggle-link").addEventListener("click", (ev) => {
-    ev.preventDefault();
-    authToggleLink.click(); // re-trigger the outer handler via a programmatic click
+  if (panelName === "login")  loginPanel.classList.remove("hidden");
+  if (panelName === "signup") signupPanel.classList.remove("hidden");
+  if (panelName === "forgot") forgotPanel.classList.remove("hidden");
+
+  [loginError, signupError, forgotError].forEach(el => {
+    el.textContent = "";
+    el.style.color = "";
   });
-});
+}
 
-// ── Auth: Handle Login / Sign Up button click ────────────────
-authBtn.addEventListener("click", async () => {
-  const email    = emailInput.value.trim();
-  const password = passwordInput.value.trim();
-  authError.textContent = "";
+goSignup.addEventListener("click",      (e) => { e.preventDefault(); showPanel("signup"); });
+goLogin.addEventListener("click",       (e) => { e.preventDefault(); showPanel("login");  });
+forgotLink.addEventListener("click",    (e) => { e.preventDefault(); showPanel("forgot"); });
+goLoginForgot.addEventListener("click", (e) => { e.preventDefault(); showPanel("login");  });
 
-  // Basic validation
+
+// ════════════════════════════════════════════════════════════
+// LOADING STATE HELPERS
+// ════════════════════════════════════════════════════════════
+function setLoading(btn, isLoading) {
+  const text    = btn.querySelector(".btn-text");
+  const spinner = btn.querySelector(".btn-spinner");
+  btn.disabled  = isLoading;
+  if (isLoading) {
+    text?.classList.add("hidden");
+    spinner?.classList.remove("hidden");
+  } else {
+    text?.classList.remove("hidden");
+    spinner?.classList.add("hidden");
+  }
+}
+
+
+// ════════════════════════════════════════════════════════════
+// ERROR MESSAGE HELPER
+// Maps Supabase error messages → friendly plain-English text
+// ════════════════════════════════════════════════════════════
+function friendlyError(error) {
+  const msg = (error?.message || "").toLowerCase();
+
+  if (msg.includes("user already registered") || msg.includes("already been registered"))
+    return "⚠️ This email is already registered. Try logging in instead.";
+  if (msg.includes("invalid login credentials") || msg.includes("invalid email or password"))
+    return "❌ Incorrect email or password. Please try again.";
+  if (msg.includes("password should be at least") || msg.includes("weak password"))
+    return "🔒 Password must be at least 6 characters long.";
+  if (msg.includes("email not confirmed"))
+    return "📧 Please confirm your email before logging in. Check your inbox.";
+  if (msg.includes("rate limit") || msg.includes("too many requests"))
+    return "⏳ Too many attempts. Please wait a minute and try again.";
+  if (msg.includes("invalid email"))
+    return "📧 Please enter a valid email address.";
+  if (msg.includes("signup is disabled"))
+    return "🚫 New signups are currently disabled. Contact support.";
+
+  return error?.message || "Something went wrong. Please try again.";
+}
+
+
+// ════════════════════════════════════════════════════════════
+// LOGIN — Email / Password
+// ════════════════════════════════════════════════════════════
+loginBtn.addEventListener("click", async () => {
+  const email    = loginEmailEl.value.trim();
+  const password = loginPassEl.value.trim();
+  loginError.textContent = "";
+  loginError.style.color = "";
+
   if (!email || !password) {
-    authError.textContent = "Please enter both email and password.";
+    loginError.textContent = "⚠️ Please enter your email and password.";
     return;
   }
 
-  authBtn.disabled    = true;
-  authBtn.textContent = "Please wait…";
+  setLoading(loginBtn, true);
+  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  setLoading(loginBtn, false);
 
-  if (isLoginMode) {
-    // ── Log In ──────────────────────────────────────────────
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) {
-      authError.textContent = error.message;
-    } else {
-      handleLoginSuccess(data.user);
-    }
-  } else {
-    // ── Sign Up ─────────────────────────────────────────────
-    const { data, error } = await supabase.auth.signUp({ email, password });
-    if (error) {
-      authError.textContent = error.message;
-    } else if (data.user && !data.session) {
-      // Supabase sends a confirmation email by default
-      authError.style.color  = "var(--green)";
-      authError.textContent  = "✅ Check your email to confirm your account, then log in.";
-    } else {
-      handleLoginSuccess(data.user);
-    }
+  if (error) loginError.textContent = friendlyError(error);
+  // On success onAuthStateChange fires → showDashboard() is called automatically
+});
+
+loginPassEl.addEventListener("keydown", (e) => { if (e.key === "Enter") loginBtn.click(); });
+
+
+// ════════════════════════════════════════════════════════════
+// SIGN UP — Email / Password
+// ════════════════════════════════════════════════════════════
+signupBtn.addEventListener("click", async () => {
+  const email    = signupEmailEl.value.trim();
+  const password = signupPassEl.value.trim();
+  signupError.textContent = "";
+  signupError.style.color = "";
+
+  if (!email) {
+    signupError.textContent = "⚠️ Please enter your email address.";
+    return;
+  }
+  if (!password || password.length < 6) {
+    signupError.textContent = "🔒 Password must be at least 6 characters long.";
+    return;
   }
 
-  authBtn.disabled    = false;
-  authBtn.textContent = isLoginMode ? "Log In" : "Sign Up";
+  setLoading(signupBtn, true);
+  const { data, error } = await supabase.auth.signUp({ email, password });
+  setLoading(signupBtn, false);
+
+  if (error) {
+    signupError.textContent = friendlyError(error);
+    return;
+  }
+
+  // If Supabase email confirmation is ON, session will be null after signup
+  if (data.user && !data.session) {
+    signupError.style.color = "var(--green)";
+    signupError.textContent = "✅ Account created! Check your email to confirm, then log in.";
+  }
+  // If email confirmation is OFF, session is returned and onAuthStateChange fires
 });
 
-// Allow pressing Enter in password field to submit
-passwordInput.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") authBtn.click();
+signupPassEl.addEventListener("keydown", (e) => { if (e.key === "Enter") signupBtn.click(); });
+
+
+// ════════════════════════════════════════════════════════════
+// FORGOT PASSWORD — Send Reset Email
+// ════════════════════════════════════════════════════════════
+forgotBtn.addEventListener("click", async () => {
+  const email = forgotEmailEl.value.trim();
+  forgotError.textContent = "";
+  forgotError.style.color = "";
+
+  if (!email) {
+    forgotError.textContent = "⚠️ Please enter your email address.";
+    return;
+  }
+
+  setLoading(forgotBtn, true);
+
+  // Supabase sends a password-reset email with a secure link.
+  // The link redirects back to REDIRECT_URL where Supabase auto-handles
+  // the token and lets the user set a new password.
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: REDIRECT_URL,
+  });
+
+  setLoading(forgotBtn, false);
+
+  if (error) {
+    forgotError.textContent = friendlyError(error);
+  } else {
+    forgotError.style.color = "var(--green)";
+    forgotError.textContent = "✅ Reset link sent! Check your inbox (and spam folder).";
+  }
 });
 
-// ── Auth: Logout ─────────────────────────────────────────────
+forgotEmailEl.addEventListener("keydown", (e) => { if (e.key === "Enter") forgotBtn.click(); });
+
+
+// ════════════════════════════════════════════════════════════
+// GOOGLE OAUTH
+// ════════════════════════════════════════════════════════════
+// signInWithOAuth() redirects the browser to Google.
+// After the user approves, Google redirects back to REDIRECT_URL.
+// Supabase SDK automatically exchanges the code for a session.
+googleBtns.forEach(btn => {
+  if (!btn) return;
+  btn.addEventListener("click", async () => {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo: REDIRECT_URL },
+    });
+    if (error) loginError.textContent = "Google login failed: " + error.message;
+  });
+});
+
+
+// ════════════════════════════════════════════════════════════
+// GITHUB OAUTH
+// ════════════════════════════════════════════════════════════
+githubBtns.forEach(btn => {
+  if (!btn) return;
+  btn.addEventListener("click", async () => {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "github",
+      options: { redirectTo: REDIRECT_URL },
+    });
+    if (error) loginError.textContent = "GitHub login failed: " + error.message;
+  });
+});
+
+
+// ════════════════════════════════════════════════════════════
+// LOGOUT
+// ════════════════════════════════════════════════════════════
 logoutBtn.addEventListener("click", async () => {
+  // Clears the session from memory AND localStorage
   await supabase.auth.signOut();
-  // onAuthStateChange will call handleLogout() automatically
+  // onAuthStateChange fires → showAuthScreen() is called automatically
 });
 
-// ── UI Helpers: show app or auth screen ──────────────────────
-function handleLoginSuccess(user) {
-  currentUser          = user;
-  userEmailSpan.textContent = user.email;
+
+// ════════════════════════════════════════════════════════════
+// UI: Show Dashboard vs Auth Screen
+// ════════════════════════════════════════════════════════════
+function showDashboard(user) {
+  currentUser = user;
+  // OAuth users may have a display name; email users just have an email
+  userEmailSpan.textContent =
+    user.user_metadata?.full_name ||
+    user.user_metadata?.user_name ||
+    user.email || "";
+
   authSection.classList.add("hidden");
   appSection.classList.remove("hidden");
-  loadExpenses(); // Fetch this user's expenses
+  loadExpenses();
 }
 
-function handleLogout() {
+function showAuthScreen() {
   currentUser = null;
   allExpenses = [];
-  authSection.classList.remove("hidden");
   appSection.classList.add("hidden");
-  emailInput.value    = "";
-  passwordInput.value = "";
+  authSection.classList.remove("hidden");
+  showPanel("login");
 }
 
-// ── Add Expense ──────────────────────────────────────────────
+
+// ════════════════════════════════════════════════════════════
+// ADD EXPENSE
+// ════════════════════════════════════════════════════════════
 expenseForm.addEventListener("submit", async (e) => {
-  e.preventDefault(); // prevent page reload
+  e.preventDefault();
   formError.textContent = "";
 
   const amount   = parseFloat(amountInput.value);
@@ -166,17 +342,15 @@ expenseForm.addEventListener("submit", async (e) => {
   const note     = noteInput.value.trim();
   const date     = dateInput.value;
 
-  // Validation
   if (!amount || amount <= 0) {
-    formError.textContent = "Please enter a valid amount greater than 0.";
+    formError.textContent = "⚠️ Please enter a valid amount greater than 0.";
     return;
   }
   if (!date) {
-    formError.textContent = "Please pick a date.";
+    formError.textContent = "⚠️ Please pick a date.";
     return;
   }
 
-  // Insert into Supabase — user_id is tied to the logged-in user
   const { error } = await supabase
     .from("expenses")
     .insert([{ user_id: currentUser.id, amount, category, note, date }]);
@@ -186,44 +360,42 @@ expenseForm.addEventListener("submit", async (e) => {
     return;
   }
 
-  // Reset form fields (keep date as today)
   amountInput.value   = "";
   noteInput.value     = "";
   dateInput.value     = new Date().toISOString().split("T")[0];
   categoryInput.value = "Food";
-
-  // Reload the expense list to show the new item
   await loadExpenses();
 });
 
-// ── Load Expenses from Supabase ──────────────────────────────
+
+// ════════════════════════════════════════════════════════════
+// LOAD EXPENSES
+// ════════════════════════════════════════════════════════════
 async function loadExpenses() {
-  // Fetch only the current user's expenses, newest first
   const { data, error } = await supabase
     .from("expenses")
     .select("*")
-    .eq("user_id", currentUser.id)   // only this user's data (also enforced by RLS)
+    .eq("user_id", currentUser.id)
     .order("date", { ascending: false });
 
-  if (error) {
-    console.error("Failed to load expenses:", error.message);
-    return;
-  }
+  if (error) { console.error("Failed to load expenses:", error.message); return; }
 
   allExpenses = data || [];
   renderExpenses(allExpenses);
   updateFilterOptions();
 }
 
-// ── Render Expense List ──────────────────────────────────────
-function renderExpenses(expenses) {
-  expenseList.innerHTML = ""; // clear old items
 
-  // Apply the active category filter
-  const selectedCategory = filterSelect.value;
-  const filtered = selectedCategory === "All"
+// ════════════════════════════════════════════════════════════
+// RENDER EXPENSE LIST
+// ════════════════════════════════════════════════════════════
+function renderExpenses(expenses) {
+  expenseList.innerHTML = "";
+
+  const selected = filterSelect.value;
+  const filtered = selected === "All"
     ? expenses
-    : expenses.filter((exp) => exp.category === selectedCategory);
+    : expenses.filter(e => e.category === selected);
 
   if (filtered.length === 0) {
     emptyState.classList.remove("hidden");
@@ -232,13 +404,10 @@ function renderExpenses(expenses) {
   }
 
   emptyState.classList.add("hidden");
-
   let total = 0;
 
-  // Build a card for each expense
-  filtered.forEach((exp) => {
+  filtered.forEach(exp => {
     total += parseFloat(exp.amount);
-
     const card = document.createElement("div");
     card.className = "expense-card";
     card.innerHTML = `
@@ -249,77 +418,57 @@ function renderExpenses(expenses) {
       </div>
       <div class="expense-right">
         <span class="expense-amount">₹${parseFloat(exp.amount).toFixed(2)}</span>
-        <button class="delete-btn" data-id="${exp.id}" title="Delete expense">✕</button>
+        <button class="delete-btn" data-id="${exp.id}" title="Delete">✕</button>
       </div>
     `;
-
-    // Attach delete handler directly on the card's button
     card.querySelector(".delete-btn").addEventListener("click", () => deleteExpense(exp.id));
     expenseList.appendChild(card);
   });
 
-  // Show the running total
   totalDisplay.textContent = `Total: ₹${total.toFixed(2)}`;
 }
 
-// ── Delete Expense ───────────────────────────────────────────
+
+// ════════════════════════════════════════════════════════════
+// DELETE EXPENSE
+// ════════════════════════════════════════════════════════════
 async function deleteExpense(id) {
-  // Remove from Supabase (RLS ensures users can only delete their own rows)
-  const { error } = await supabase
-    .from("expenses")
-    .delete()
-    .eq("id", id);
-
-  if (error) {
-    alert("Could not delete expense: " + error.message);
-    return;
-  }
-
-  // Reload the list to reflect the deletion
+  const { error } = await supabase.from("expenses").delete().eq("id", id);
+  if (error) { alert("Could not delete: " + error.message); return; }
   await loadExpenses();
 }
 
-// ── Filter by Category ───────────────────────────────────────
-filterSelect.addEventListener("change", () => {
-  renderExpenses(allExpenses);
-});
 
-// Populate the filter dropdown with categories present in allExpenses
+// ════════════════════════════════════════════════════════════
+// FILTER
+// ════════════════════════════════════════════════════════════
+filterSelect.addEventListener("change", () => renderExpenses(allExpenses));
+
 function updateFilterOptions() {
-  const currentFilter = filterSelect.value;
-  const categories    = ["All", ...new Set(allExpenses.map((e) => e.category))];
-
+  const current    = filterSelect.value;
+  const categories = ["All", ...new Set(allExpenses.map(e => e.category))];
   filterSelect.innerHTML = "";
-  categories.forEach((cat) => {
-    const opt   = document.createElement("option");
-    opt.value   = cat;
-    opt.textContent = cat;
+  categories.forEach(cat => {
+    const opt = document.createElement("option");
+    opt.value = cat; opt.textContent = cat;
     filterSelect.appendChild(opt);
   });
-
-  // Restore previously selected filter if it still exists
-  if (categories.includes(currentFilter)) {
-    filterSelect.value = currentFilter;
-  }
+  if (categories.includes(current)) filterSelect.value = current;
 }
 
-// ── Utility: Format date string nicely ──────────────────────
+
+// ════════════════════════════════════════════════════════════
+// UTILITIES
+// ════════════════════════════════════════════════════════════
 function formatDate(dateStr) {
-  // dateStr is "YYYY-MM-DD"; Date constructor in UTC — add T00:00 to avoid timezone shift
   const d = new Date(dateStr + "T00:00");
   return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
 }
 
-// ── Utility: CSS class per category for colour-coding ────────
-function getCategoryClass(category) {
+function getCategoryClass(cat) {
   const map = {
-    Food       : "cat-food",
-    Transport  : "cat-transport",
-    Shopping   : "cat-shopping",
-    Health     : "cat-health",
-    Bills      : "cat-bills",
-    Education  : "cat-education",
-    Other      : "cat-other",
+    Food:"cat-food", Transport:"cat-transport", Shopping:"cat-shopping",
+    Health:"cat-health", Bills:"cat-bills", Education:"cat-education", Other:"cat-other",
   };
-  return map[category] || "cat-other";
+  return map[cat] || "cat-other";
 }
