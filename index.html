@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Expense Tracker</title>
+
+  <!-- ✅ FIXED -->
+  <link rel="icon" type="image/png" href="logo.png" />
+
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- ======================================================
+       PAGE HEADER — shown once logged in
+       ====================================================== -->
+  <header class="page-header" id="app-header">
+    <div class="logo-container">
+  <img src="logo.png" alt="logo" class="logo">
+  <h1>Expense <span>Tracker</span></h1>
+</div>
+    <div class="header-right">
+      <!-- Displays the logged-in user's email -->
+      <span id="user-email"></span>
+      <!-- Clicking this logs the user out via Supabase Auth -->
+      <button class="btn-outline" id="logout-btn">Log Out</button>
+    </div>
+  </header>
+
+
+  <!-- ======================================================
+       AUTH SECTION — shown when the user is NOT logged in
+       ====================================================== -->
+  <section id="auth-section">
+    <div class="auth-card">
+
+      <!-- Title changes between "Welcome Back" and "Create Account" -->
+      <h2 id="auth-title">Welcome Back</h2>
+      <p class="subtitle">Track every rupee, effortlessly.</p>
+
+      <!-- Email field -->
+      <div class="field-group">
+        <label for="email">Email</label>
+        <input type="email" id="email" placeholder="you@example.com" autocomplete="email" />
+      </div>
+
+      <!-- Password field -->
+      <div class="field-group">
+        <label for="password">Password</label>
+        <input type="password" id="password" placeholder="••••••••" autocomplete="current-password" />
+      </div>
+
+      <!-- Error / success messages for auth -->
+      <p class="error-msg" id="auth-error"></p>
+
+      <!-- Primary action button: "Log In" or "Sign Up" -->
+      <button class="btn-primary" id="auth-btn">Log In</button>
+
+      <!-- Toggle between login and signup modes -->
+      <p class="toggle-text" id="auth-toggle-text">
+        Don't have an account? <a href="#" id="auth-toggle-link">Sign Up</a>
+      </p>
+
+    </div>
+  </section>
+
+
+  <!-- ======================================================
+       APP SECTION — shown only when the user IS logged in
+       ====================================================== -->
+  <main id="app-section" class="hidden">
+    <div class="app-grid">
+
+      <!-- ── LEFT COLUMN: Add Expense Form ──────────────── -->
+      <div class="section-card">
+        <h2>Add Expense</h2>
+
+        <!--
+          Each submit triggers the "submit" event in script.js.
+          We use event.preventDefault() to avoid page reload.
+        -->
+        <form id="expense-form" novalidate>
+
+          <!-- Amount -->
+          <div class="field-group">
+            <label for="amount">Amount (₹)</label>
+            <input
+              type="number"
+              id="amount"
+              placeholder="e.g. 250"
+              min="0.01"
+              step="0.01"
+              required
+            />
+          </div>
+
+          <!-- Category & Date side by side on wider screens -->
+          <div class="form-row">
+
+            <!-- Category dropdown -->
+            <div class="field-group">
+              <label for="category">Category</label>
+              <select id="category">
+                <option value="Food">🍛 Food</option>
+                <option value="Transport">🚌 Transport</option>
+                <option value="Shopping">🛍 Shopping</option>
+                <option value="Health">💊 Health</option>
+                <option value="Bills">🧾 Bills</option>
+                <option value="Education">📚 Education</option>
+                <option value="Other">📦 Other</option>
+              </select>
+            </div>
+
+            <!-- Date picker -->
+            <div class="field-group">
+              <label for="date">Date</label>
+              <input type="date" id="date" required />
+            </div>
+
+          </div>
+
+          <!-- Note / description -->
+          <div class="field-group">
+            <label for="note">Note (optional)</label>
+            <textarea id="note" placeholder="e.g. Lunch at Murugan Idli Shop"></textarea>
+          </div>
+
+          <!-- Error messages for the form -->
+          <p class="error-msg" id="form-error"></p>
+
+          <!-- Submit button -->
+          <button type="submit" class="btn-primary">Add Expense</button>
+
+        </form>
+      </div><!-- /left column -->
+
+
+      <!-- ── RIGHT COLUMN: Expense List ────────────────── -->
+      <div class="section-card">
+
+        <!-- Summary Bar: total + filter -->
+        <div class="summary-bar">
+          <!-- Running total of displayed (filtered) expenses -->
+          <div id="total-display">Total: ₹0.00</div>
+
+          <!-- Filter dropdown — populated dynamically from categories in the data -->
+          <div class="filter-group">
+            <label for="filter-category">Filter:</label>
+            <select id="filter-category">
+              <option value="All">All</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- List of expense cards — built dynamically in script.js -->
+        <div id="expense-list"></div>
+
+        <!-- Shown when there are no expenses (or none match the filter) -->
+        <div id="empty-state" class="hidden">
+          <div class="empty-icon">🗒️</div>
+          <p>No expenses yet. Add your first one!</p>
+        </div>
+
+      </div><!-- /right column -->
+
+    </div><!-- /app-grid -->
+  </main>
+
+
+  <!-- ======================================================
+       JavaScript Entry Point
+       type="module" enables ES module imports (import/export)
+       ====================================================== -->
+  <script type="module" src="script.js"></script>
+
+</body>
+</html>
